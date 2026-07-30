@@ -128,6 +128,12 @@ docker buildx build --target paks --output type=local,dest=artifacts .
   and `code/`. `code/ui/ui_shared.h` includes `../../ui/menudef.h`, so the
   top-level `ui/` directory is required; `Dockerfile.quakedev` got away with a
   partial copy only because `dev/Dockerfile.quake` had cloned the full tree first.
+- **`fs_homepath` must be relative.** `code/sys/sys_node.js` does
+  `PATH.join('.', fs_homepath)` and uses the result as both the NODEFS host root
+  and the emscripten mount point, so an absolute value loses its leading slash and
+  FS_Startup fails. The entrypoint therefore leaves it unset, which means the
+  engine writes `games.log` and `q3config_server.cfg` inside `base/<fs_game>/`
+  rather than in a separate state directory.
 - **`quakejs-files` has been unpublished from npm.** The `0.0.3` tarball returns
   404, so it was removed from both `package.json` and `dev/assets-package.json` to
   make installs work again. Two consequences:
@@ -144,8 +150,8 @@ docker buildx build --target paks --output type=local,dest=artifacts .
 - **`base/` layout from the CDN.** Verify that `dev/derive-base.sh` produces a
   tree the dedicated server accepts. If the content server's manifest yields a
   repacked, map-specific set rather than `pak0`–`pak8`, fall back to letting the
-  server self-download into a volume mounted at `/var/lib/quake` (the commented
-  `quake-home` volume in `compose.yml`).
+  server self-download into base/ on first run, with the commented `quake-base`
+  volume in `compose.yml` uncommented so the download survives a restart.
 - **Debian 11.** Required for python2, which emscripten 1.13.2 needs. Bullseye
   LTS ends 2026-08; the toolchain section of `Containerfile` has a commented
   mirror rewrite for when the packages move to `archive.debian.org`. Pushing the

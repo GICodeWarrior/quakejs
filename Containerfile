@@ -459,12 +459,21 @@ COPY --from=pak-build /paks/pak100.pk3 /paks/pak101.pk3 base/hf/
 
 COPY dev/quake.sh bin/quake.sh
 
-# fs_homepath: everything the engine writes (logs, generated configs) goes here,
-# outside the baked-in read-only game data. Not persisted by default -- console
-# output goes to stdout/stderr. Mount a volume here if games.log needs to survive
-# a container restart.
-ENV QUAKE_HOMEPATH=/var/lib/quake
-RUN mkdir -p ${QUAKE_HOMEPATH} && chown quake:quake ${QUAKE_HOMEPATH}
+# Writable working directory.
+#
+# There is no separate home path to point at: code/sys/sys_node.js resolves
+# fs_homepath relative to the cwd (PATH.join('.', fs_homepath)) and mounts the
+# host directory there, so the engine's writes -- games.log, q3config_server.cfg
+# -- necessarily land inside the game data tree under base/<fs_game>/. base/ is
+# already owned by the runtime user via the --chown copies above.
+#
+# /opt/ioq3 itself is made writable so that FS_Startup can create a directory in
+# the cwd if the engine default calls for one. Without this, mkdirSync fails with
+# EACCES and the fallback path reports a confusing ENOENT instead.
+#
+# Nothing here is persisted: console output goes to stdout/stderr. See compose.yml
+# for the optional volume if games.log needs to survive a restart.
+RUN chown quake:quake /opt/ioq3
 
 USER quake
 EXPOSE 27960

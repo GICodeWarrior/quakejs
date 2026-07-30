@@ -86,11 +86,18 @@ services:
     depends_on:
       assets:
         condition: service_healthy
-    # Console output goes to stdout/stderr. Anything the engine writes to disk
-    # lands under fs_homepath (/var/lib/quake) and is intentionally not
-    # persisted. To keep games.log across restarts, uncomment:
+    # Console output goes to stdout/stderr, so logs need no volume.
+    #
+    # The engine writes games.log and q3config_server.cfg inside the game data
+    # tree (see the server stage in Containerfile -- fs_homepath is resolved
+    # relative to the working directory, so there is nowhere else to put them).
+    # Those writes are discarded on recreate. To persist them, uncomment below:
+    # Docker seeds an empty named volume from the image, so the baked-in game data
+    # is preserved on first start -- but note that the volume then shadows the
+    # image, so a rebuilt server image will NOT refresh the paks until the volume
+    # is removed.
     # volumes:
-    #   - quake-home:/var/lib/quake
+    #   - quake-base:/opt/ioq3/base
 
   # -------------------------------------------------------------------------
   # Static client.
@@ -117,4 +124,4 @@ services:
       start_period: 10s
 
 # volumes:
-#   quake-home:
+#   quake-base:

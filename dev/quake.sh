@@ -7,8 +7,14 @@
 #     so it was never applied as a console command; the server was relying on
 #     server.cfg to set dedicated. Harmless to fix -- +exec still runs afterwards,
 #     so server.cfg continues to win where they disagree.
-#   * fs_homepath is set explicitly, so everything the engine writes (games.log,
-#     generated configs) lands outside the baked-in read-only game data.
+#   * fs_homepath is deliberately NOT set. code/sys/sys_node.js does
+#     PATH.join('.', fs_homepath) and uses the result both as the NODEFS host root
+#     and as the emscripten mount point, so the value must be RELATIVE to the
+#     working directory. An absolute path has its leading slash absorbed by join
+#     ('/var/lib/quake' -> 'var/lib/quake'), and FS_Startup then dies with
+#     "ENOENT: no such file or directory, stat 'var'". Leaving it unset uses the
+#     engine default, which is what the original invocation relied on: the engine
+#     writes games.log and q3config_server.cfg under base/<fs_game>/.
 #   * The CDN wait loop is now bounded and can be disabled, since compose gates
 #     startup on the assets healthcheck instead of spinning here forever.
 #   * The CDN address is configurable. It is still the compose service name by
@@ -19,7 +25,6 @@ set -e
 
 QUAKE_GAME="${QUAKE_GAME:-baseq3}"
 QUAKE_CDN="${QUAKE_CDN:-assets:9000}"
-QUAKE_HOMEPATH="${QUAKE_HOMEPATH:-/var/lib/quake}"
 QUAKE_WAIT_FOR_CDN="${QUAKE_WAIT_FOR_CDN:-1}"
 QUAKE_WAIT_TIMEOUT="${QUAKE_WAIT_TIMEOUT:-120}"
 
@@ -36,14 +41,11 @@ if [ "$QUAKE_WAIT_FOR_CDN" = "1" ]; then
   done
 fi
 
-mkdir -p "${QUAKE_HOMEPATH}"
-
-echo "quake: starting fs_game=${QUAKE_GAME} fs_cdn=${QUAKE_CDN} fs_homepath=${QUAKE_HOMEPATH}" >&2
+echo "quake: starting fs_game=${QUAKE_GAME} fs_cdn=${QUAKE_CDN}" >&2
 
 # Argument order matches the original: fs_game, dedicated, exec server.cfg, then
 # fs_cdn last.
 exec node build/release-js-js/ioq3ded.js \
-  +set fs_homepath "${QUAKE_HOMEPATH}" \
   +set fs_game "${QUAKE_GAME}" \
   +set dedicated 1 \
   +exec server.cfg \
