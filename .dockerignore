@@ -26,9 +26,6 @@ base/**/*.pk3
 base/hf/games.log
 base/hf/q3config_server.cfg
 html/hf/shenanigans/
-# Tracked, but the web image takes the client from quake-build so the image
-# always matches the current submodule.
-html/ioquake3.js
 
 # --- ioq3 ---
 #

@@ -46,7 +46,7 @@ have containers from the old stack, remove them once:
 ## Development
 
 ```shell
-docker compose -f compose.yml -f compose.dev.yml watch
+docker compose -f compose.yml -f compose.dev.yml up --build --watch
 ```
 
 Editing `ioq3`, `hf/shenanigans`, `hf/sounds`, or `html` rebuilds only the
@@ -103,28 +103,6 @@ extraction:
 docker buildx build --target paks --output type=local,dest=artifacts .
 ```
 
-## What changed
-
-- **No bind mounts.** Each image carries its artifacts. `docker compose up` works
-  from `compose.yml` alone, with no checkout of this repository.
-- **No host build steps.** The former `dev.sh` extraction (`docker run ... | tar`
-  back onto the host), the host `hf/buildpak3.sh` run, the host `npm exec tsc`,
-  and the host `touch ioq3/code/tools/lcc/lburg/gram.c` are all build stages now.
-  `hf/buildpak3.sh` is still the definition of pak101's contents, but it runs
-  against the in-image copy of `hf/`.
-- **Game data is fetched at build time.** `dev/get_assets.sh` runs in the
-  `content-fetch` stage and the result is copied straight into `base/`, so the
-  dedicated server no longer downloads the asset set on first run. No conversion
-  step is needed: the GitHub mirror stores plain-named pk3s, and `bin/content.js`
-  computes the crc32 prefixes itself at startup.
-- **`dev/patch-quake.sh` is no longer run.** The pinned submodule already
-  contains its edits, in a form that differs from what the script generates, so
-  re-running it would corrupt the tree. `Containerfile` asserts the tree is
-  patched instead, and fails the build if the submodule is bumped to an
-  unpatched commit.
-- **The assets image is built locally** (reviving `dev/Dockerfile.assets`)
-  instead of pulling a prebuilt image and bind-mounting `./base/hf` over it.
-
 ## Open items
 
 - **Client and server reach the CDN by different names.** `dev/quake.sh` defaults
@@ -136,9 +114,6 @@ docker buildx build --target paks --output type=local,dest=artifacts .
   services across hosts means editing `html/index.html`. `bin/wssproxy.js` also
   exists but is not wired into compose; if a proxy fronts the dedicated server in
   production, that belongs here too.
-- **`html/ioquake3.js` is still tracked** but is no longer a build input
-  (`.dockerignore` excludes it; the web image takes the client from the build).
-  It can be removed from git once you are satisfied the built client matches.
 - **The whole `ioq3` submodule is copied into the build**, not just `Makefile`
   and `code/`. `code/ui/ui_shared.h` includes `../../ui/menudef.h`, so the
   top-level `ui/` directory is required too, and the Makefile reaches for other
@@ -150,11 +125,6 @@ docker buildx build --target paks --output type=local,dest=artifacts .
   FS_Startup fails. The entrypoint therefore leaves it unset, which means the
   engine writes `games.log` and `q3config_server.cfg` inside `base/<fs_game>/`
   rather than in a separate state directory.
-- **`base/` layout from the mirror.** Confirm the fetched tree is one the
-  dedicated server accepts. If the mirror yields a repacked, map-specific set
-  rather than `pak0`–`pak8`, fall back to letting the server self-download into
-  `base/` on first run, with the commented `quake-base` volume in `compose.yml`
-  uncommented so the download survives a restart.
 - **Debian 11.** Required for python2, which emscripten 1.13.2 needs. Bullseye
   LTS ends 2026-08; the toolchain section of `Containerfile` has a commented
   mirror rewrite for when the packages move to `archive.debian.org`. Pushing the

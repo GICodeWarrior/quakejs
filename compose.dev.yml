@@ -1,8 +1,8 @@
 # Development override.
 #
-#   docker compose -f compose.yml -f compose.dev.yml watch
+#   docker compose -f compose.yml -f compose.dev.yml up --build --watch
 #
-# `watch` builds, starts, and then rebuilds the affected services when the paths
+# Builds, starts, and then rebuilds the affected services when the paths
 # below change. Rebuilds hit the cache mounts declared in Containerfile, so an
 # edit to a single ioq3 source file recompiles that translation unit and relinks
 # rather than rebuilding the world.
