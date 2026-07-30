@@ -12,6 +12,14 @@
 
 name: quakening
 
+# No container_name: entries. The old docker-compose.yml pinned them (quake,
+# quake-web, quake-assets), but container names are a daemon-global namespace, so
+# they collide with any leftover container of the same name -- including the ones
+# the previous stack left behind, which this project (name: quakening) does not
+# recognise as its own. Compose names containers <project>-<service>-<n> instead,
+# and service names remain the network aliases, so `fs_cdn assets:9000` is
+# unaffected. Use `docker compose logs -f quake` / `docker compose exec quake sh`.
+#
 # Override REGISTRY and TAG (in a .env file or the environment) to push and pull
 # these images from a registry rather than building locally.
 #
@@ -38,7 +46,6 @@ services:
       args:
         TOOLCHAIN_IMAGE: ${TOOLCHAIN_IMAGE:-toolchain}
         CONTENT_SERVER: ${CONTENT_SERVER:-http://content.quakejs.com}
-    container_name: quake-assets
     restart: unless-stopped
     networks: [quakening]
     ports:
@@ -66,7 +73,6 @@ services:
         TOOLCHAIN_IMAGE: ${TOOLCHAIN_IMAGE:-toolchain}
         MAKE_JOBS: ${MAKE_JOBS:-12}
         CONTENT_SERVER: ${CONTENT_SERVER:-http://content.quakejs.com}
-    container_name: quake
     restart: unless-stopped
     networks: [quakening]
     ports:
@@ -98,7 +104,6 @@ services:
       args:
         TOOLCHAIN_IMAGE: ${TOOLCHAIN_IMAGE:-toolchain}
         MAKE_JOBS: ${MAKE_JOBS:-12}
-    container_name: quake-web
     restart: unless-stopped
     networks: [quakening]
     ports:

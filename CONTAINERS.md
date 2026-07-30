@@ -34,6 +34,11 @@ With that set, the toolchain stages fall outside the build graph and are never
 executed. The Container Images workflow publishes this image on every push to
 `main`.
 
+Containers are named `quakening-<service>-1`; use `docker compose logs -f quake`
+and `docker compose exec quake sh` rather than fixed container names. If you still
+have containers from the old stack, remove them once:
+`docker rm -f quake quake-web quake-assets`.
+
 - web: <http://localhost:8080>
 - content server: <http://localhost:9000/assets/manifest.json>
 - dedicated server: `localhost:27960` (WebSockets, so TCP)
