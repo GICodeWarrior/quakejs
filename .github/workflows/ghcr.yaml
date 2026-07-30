@@ -1,13 +1,12 @@
 ---
-# Builds and publishes the three runtime images.
+# Builds and publishes the three runtime images, and extracts the pk3 artifacts.
 #
-# Replaces the previous single-image job (which built dev/Dockerfile.quake, the
-# build-tools image that doubled as a runtime image).
-#
-# Deliberately one sequential job rather than a matrix: all three images share the
+# Deliberately one sequential job rather than a matrix: every target shares the
 # toolchain and quake-build stages, so building them in a single BuildKit session
 # compiles those once and reuses them from the local cache. Parallel jobs would
-# each have to re-import the (very large) toolchain layers from the remote cache.
+# each have to re-import the (very large) toolchain layers from the remote cache,
+# or recompile LLVM outright -- which is why the pak artifacts are built here
+# rather than in a workflow of their own.
 name: Container Images
 
 on:
@@ -18,7 +17,6 @@ on:
 
 env:
   registry: ghcr.io
-  # Shared explicitly so the paks workflow can reuse these layers.
   cache_scope: quakejs
 
 permissions:
@@ -126,5 +124,38 @@ jobs:
           tags: ${{ steps.meta_assets.outputs.tags }}
           labels: ${{ steps.meta_assets.outputs.labels }}
           platforms: "linux/amd64"
+          # Must match the other targets: MAKE_JOBS is interpolated into the
+          # quake-build RUN, so a different value is a cache miss and recompiles
+          # the whole engine.
+          build-args: |
+            MAKE_JOBS=4
           cache-from: type=gha,scope=${{ env.cache_scope }}
           cache-to: type=gha,scope=${{ env.cache_scope }},mode=max
+
+      # The `paks` target is a scratch image holding just the two pk3 files, so
+      # --output extracts them directly with no container to run or copy from.
+      # Everything it needs is already in the local cache by this point.
+      - name: Build paks
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Containerfile
+          target: paks
+          platforms: "linux/amd64"
+          outputs: type=local,dest=artifacts
+          build-args: |
+            MAKE_JOBS=4
+          cache-from: type=gha,scope=${{ env.cache_scope }}
+          cache-to: type=gha,scope=${{ env.cache_scope }},mode=max
+
+      - name: Upload pak100.pk3
+        uses: actions/upload-artifact@v4
+        with:
+          name: pak100.pk3
+          path: artifacts/pak100.pk3
+
+      - name: Upload pak101.pk3
+        uses: actions/upload-artifact@v4
+        with:
+          name: pak101.pk3
+          path: artifacts/pak101.pk3

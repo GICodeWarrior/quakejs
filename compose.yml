@@ -12,13 +12,11 @@
 
 name: quakening
 
-# No container_name: entries. The old docker-compose.yml pinned them (quake,
-# quake-web, quake-assets), but container names are a daemon-global namespace, so
-# they collide with any leftover container of the same name -- including the ones
-# the previous stack left behind, which this project (name: quakening) does not
-# recognise as its own. Compose names containers <project>-<service>-<n> instead,
-# and service names remain the network aliases, so `fs_cdn assets:9000` is
-# unaffected. Use `docker compose logs -f quake` / `docker compose exec quake sh`.
+# No container_name: entries -- container names are a daemon-global namespace and
+# collide with leftovers this project does not recognise as its own. Compose names
+# containers <project>-<service>-<n>, and service names remain the network
+# aliases, so `fs_cdn assets:9000` is unaffected. Use
+# `docker compose logs -f quake` / `docker compose exec quake sh`.
 #
 # Override REGISTRY and TAG (in a .env file or the environment) to push and pull
 # these images from a registry rather than building locally.
@@ -45,10 +43,15 @@ services:
       target: assets
       args:
         TOOLCHAIN_IMAGE: ${TOOLCHAIN_IMAGE:-toolchain}
-        CONTENT_SERVER: ${CONTENT_SERVER:-http://content.quakejs.com}
+        # Optional asset mirror, gh:owner/repo[@ref][:subdir]; empty uses the
+        # default in dev/get_assets.sh. Must match the quake service, or the two
+        # builds fetch the asset set twice.
+        ASSETS_SOURCE: ${ASSETS_SOURCE:-}
     restart: unless-stopped
     networks: [quakening]
     ports:
+      # html/index.html derives the client's fs_cdn as <page host>:9000, so this
+      # published port cannot be changed without editing the client too.
       - "${ASSETS_PORT:-9000}:9000"
     healthcheck:
       # content.js gzips every asset at startup to compute compressed sizes, so
@@ -60,8 +63,8 @@ services:
       start_period: 180s
 
   # -------------------------------------------------------------------------
-  # Dedicated server. Game data is baked into the image, so this no longer
-  # downloads ~500MB from the CDN on first start.
+  # Dedicated server. Game data is baked into the image, so this does not
+  # download the asset set from the CDN on first start.
   # -------------------------------------------------------------------------
   quake:
     image: ${REGISTRY:-localhost}/quake-server:${TAG:-latest}
@@ -72,30 +75,27 @@ services:
       args:
         TOOLCHAIN_IMAGE: ${TOOLCHAIN_IMAGE:-toolchain}
         MAKE_JOBS: ${MAKE_JOBS:-12}
-        CONTENT_SERVER: ${CONTENT_SERVER:-http://content.quakejs.com}
+        # Keep in step with the assets service; see the note there.
+        ASSETS_SOURCE: ${ASSETS_SOURCE:-}
     restart: unless-stopped
     networks: [quakening]
     ports:
-      # QuakeJS networking is WebSockets, so this is TCP.
+      # QuakeJS networking is WebSockets, so this is TCP. html/index.html hardcodes
+      # 27960 in its +connect argument, so changing this needs a client edit too.
       - "${QUAKE_PORT:-27960}:27960"
     environment:
       QUAKE_GAME: ${QUAKE_GAME:-hf}
-      # Resolves via compose DNS. A browser cannot resolve this name -- the
-      # client's CDN address is configured separately in the web content.
+      # Server-side only; resolves via compose DNS. The browser client derives
+      # its own CDN address from the page host -- see CONTAINERS.md.
       QUAKE_CDN: ${QUAKE_CDN:-assets:9000}
     depends_on:
       assets:
         condition: service_healthy
-    # Console output goes to stdout/stderr, so logs need no volume.
-    #
-    # The engine writes games.log and q3config_server.cfg inside the game data
-    # tree (see the server stage in Containerfile -- fs_homepath is resolved
-    # relative to the working directory, so there is nowhere else to put them).
-    # Those writes are discarded on recreate. To persist them, uncomment below:
-    # Docker seeds an empty named volume from the image, so the baked-in game data
-    # is preserved on first start -- but note that the volume then shadows the
-    # image, so a rebuilt server image will NOT refresh the paks until the volume
-    # is removed.
+    # Console output goes to stdout/stderr, so logs need no volume. The engine
+    # writes games.log and q3config_server.cfg inside the game data tree (see
+    # CONTAINERS.md); those writes are discarded on recreate. To persist them,
+    # uncomment below -- but note the volume then shadows the image, so a rebuilt
+    # server image will NOT refresh the paks until the volume is removed.
     # volumes:
     #   - quake-base:/opt/ioq3/base
 
@@ -114,7 +114,7 @@ services:
     restart: unless-stopped
     networks: [quakening]
     ports:
-      # nginx listens on 80 inside the container; the external port is unchanged.
+      # nginx listens on 80 inside the container.
       - "${WEB_PORT:-8080}:80"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/index.html"]

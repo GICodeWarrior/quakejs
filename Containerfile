@@ -5,10 +5,7 @@
 #
 # IMPORTANT: no build step here writes to the working tree. Docker copies the
 # context into the image, and every modification (the gram.c touch, the pak
-# staging, the tsc output) happens to that copy. This replaces the old flow,
-# where dev.sh touched ioq3/code/tools/lcc/lburg/gram.c in place, hf/buildpak3.sh
-# wrote into hf/build/, tsc wrote into html/hf/shenanigans/, and built paks were
-# extracted back into base/hf/ and assets/hf/.
+# staging, the tsc output) happens to that copy.
 #
 # Build targets:
 #   web       - static client (nginx): index.html + ioquake3.js + shenanigans
@@ -185,39 +182,24 @@ RUN PATH=${LLVM}:$PATH ${EMSCRIPTEN}/emmake --generate-config
 
 # --- source copy: everything below is invalidated by an ioq3 edit ---
 #
-# The whole submodule, not just Makefile and code/.
+# The whole submodule, not just Makefile and code/: code/ui/ui_shared.h includes
+# "../../ui/menudef.h", so the top-level ui/ directory is required too. See
+# CONTAINERS.md for why a partial copy is not worth attempting.
 #
-# Dockerfile.quakedev copied only those two, but that worked because
-# dev/Dockerfile.quake had already git-cloned the full ioq3 tree into /opt/ioq3,
-# so the rest was present and quakedev merely overwrote two paths. With the clone
-# gone, a partial copy breaks the build: code/ui/ui_shared.h includes
-# "../../ui/menudef.h", which resolves to the top-level ui/ directory, so the
-# client fails with 'menudef.h file not found'.
-#
-# Copying the tree wholesale reproduces what the clone provided and avoids having
-# to predict which non-code paths the Makefile reaches for. .dockerignore keeps
-# ioq3/.git, ioq3/build/, and ioq3/node_modules/ out; note that node_modules must
-# be excluded because the ws install above lives at /opt/ioq3/node_modules and
-# this COPY merges into that directory.
+# .dockerignore keeps ioq3/.git, ioq3/build/, and ioq3/node_modules/ out.
+# node_modules must be excluded because the ws install above lives at
+# /opt/ioq3/node_modules and this COPY merges into that directory.
 COPY ioq3/ ./
 
-# dev/patch-quake.sh is deliberately NOT run.
+# dev/patch-quake.sh is deliberately NOT run: the pinned submodule already
+# carries its edits, in a hand-curated form that differs from what the script
+# generates, so re-running it would corrupt the tree. See the header of
+# dev/patch-quake.sh for the specific divergences.
 #
-# The pinned ioq3 submodule already contains all five of its edits, committed
-# upstream in the fork, in a hand-curated form that differs from what the script
-# generates: '-g4' is absent, SYSC__deps uses 'Con_ToggleConsole_f' rather than
-# '_Con_ToggleConsole_f', the third INVOKE_RUN=0 (the QVM target) is deliberately
-# left without LINKABLE, and only the client EXPORTED_FUNCTIONS carries the
-# console export. Re-running the script would duplicate flags and add exports to
-# targets that were intentionally left alone.
-#
-# In the old build this was masked: the script patched a fresh GitHub clone in
-# dev/Dockerfile.quake, and Dockerfile.quakedev then copied the local (already
-# patched) Makefile and code/ over the top, so the submodule's version won.
-#
-# Instead, assert the tree is in the state the build expects. This fails loudly
-# if the submodule is ever bumped to an unpatched commit, rather than producing a
-# broken link hours later.
+# Assert instead that the tree is in the state the build expects, so bumping the
+# submodule to an unpatched commit fails here rather than as a broken link hours
+# later. The console-export patterns are quoted to distinguish the prefixed
+# '_Con_ToggleConsole_f' in the Makefile from the bare name in SYSC__deps.
 RUN set -e; \
     require() { \
       grep -qF "$2" "$1" || { \
@@ -229,16 +211,14 @@ RUN set -e; \
     }; \
     require Makefile 'INVOKE_RUN=1 -s LINKABLE=1' 'server LINKABLE=1'; \
     require Makefile 'INVOKE_RUN=0 -s LINKABLE=1' 'client LINKABLE=1'; \
-    require Makefile '_Con_ToggleConsole_f' 'console export in EXPORTED_FUNCTIONS'; \
-    require code/sys/sys_common.js 'Con_ToggleConsole_f' 'console export in SYSC__deps'; \
+    require Makefile "'_Con_ToggleConsole_f'" 'console export in EXPORTED_FUNCTIONS'; \
+    require code/sys/sys_common.js "'Con_ToggleConsole_f'" 'console export in SYSC__deps'; \
     require code/sys/sys_node.js 'PromptEULA: function (callback) { return callback();' 'EULA short-circuit'
 
 # A plain git clone gives every file effectively the same mtime, so make thinks
 # gram.y is newer than the checked-in gram.c and tries to regenerate it -- which
 # fails, because this bison/yacc can't process that file. Touching the generated
-# file makes it unambiguously newer.
-#
-# dev.sh did this to the working tree. Here it applies only to the in-image copy.
+# file makes it unambiguously newer. This applies only to the in-image copy.
 RUN touch code/tools/lcc/lburg/gram.c
 
 # The build itself.
@@ -251,7 +231,7 @@ RUN touch code/tools/lcc/lburg/gram.c
 # CRITICAL: cache mounts are NOT part of the image. Anything left in build/ when
 # this RUN exits is gone. The artifacts must therefore be copied out to a real
 # path (/out) inside this same RUN, which is also where the correctness checks
-# that dev.sh used to perform after extraction now live.
+# on the build output live.
 COPY dev/build-quake.sh /tmp/
 ARG MAKE_JOBS=12
 RUN --mount=type=cache,target=/opt/ioq3/build,sharing=locked \
@@ -271,12 +251,9 @@ RUN --mount=type=cache,target=/opt/ioq3/build,sharing=locked \
 # pak-build -- package the compiled QVMs and the hf sound overrides.
 #
 # Light base with just zip; pulls the compiled output in via COPY --from.
-# Replaces `sh dev.sh build-pk3`, which did this in the build image and then
-# extracted the results back onto the host.
 #
 # hf/buildpak3.sh is reused rather than reimplemented, so the definition of
-# pak101's contents stays in one place. It runs against the in-image copy of hf/,
-# so it no longer writes hf/build/ into the working tree.
+# pak101's contents stays in one place. It runs against the in-image copy of hf/.
 # ===========================================================================
 FROM debian:11-slim AS pak-build
 
@@ -302,8 +279,7 @@ RUN unzip -l /paks/pak101.pk3 \
 
 
 # ===========================================================================
-# paks -- extraction target for CI, replacing the pak100/pak101 workflows'
-# reliance on dev.sh and a host-side hf/buildpak3.sh run:
+# paks -- extraction target for CI:
 #
 #   docker buildx build --target paks --output type=local,dest=artifacts .
 # ===========================================================================
@@ -314,23 +290,17 @@ COPY --from=pak-build /paks/pak101.pk3 /pak101.pk3
 
 # ===========================================================================
 # shenanigans-build -- TypeScript for the in-page effects.
-# Replaces `npm exec tsc` on the host, which wrote into html/hf/shenanigans/.
 # ===========================================================================
 FROM node:22-bookworm-slim AS shenanigans-build
 
 WORKDIR /src
 
 COPY package.json ./
-# --no-package-lock: package-lock.json still pins quakejs-files@0.0.3, whose
-# tarball has been unpublished from the registry (404), so `npm ci` cannot
-# succeed against it. Resolving from package.json alone works now that the
-# dependency has been dropped. Regenerating the lockfile (see CONTAINERS.md)
-# would let this go back to `npm ci`.
-#
+COPY package-lock.json ./
 # --ignore-scripts: the runtime dependency set includes very old packages with
 # native build steps that are irrelevant to tsc and fail on modern node.
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install --no-package-lock --ignore-scripts --no-audit --no-fund
+    npm install --ignore-scripts --no-audit --no-fund
 
 COPY tsconfig.json ./
 COPY hf/shenanigans ./hf/shenanigans
@@ -340,8 +310,7 @@ COPY hf/shenanigans ./hf/shenanigans
 RUN npx tsc
 
 # The non-TypeScript assets that live alongside the sources (style.css, the
-# background jpg, the per-effect subdirectories). Mirrors dev.sh's
-# `tar -c --exclude '*.ts'`.
+# background jpg, the per-effect subdirectories).
 RUN cd hf/shenanigans \
  && tar -c --exclude '*.ts' . | tar -x -C /src/html/hf/shenanigans \
  && test -f /src/html/hf/shenanigans/Utils.js \
@@ -349,12 +318,11 @@ RUN cd hf/shenanigans \
 
 
 # ===========================================================================
-# content-fetch -- download the baseq3 asset set from a quakejs content server.
+# content-fetch -- download the baseq3 asset set.
 #
-# This is ~1GB over the network and is the least reproducible part of the build,
-# so it is isolated in its own early stage: nothing in this repo can invalidate
-# it. Consider vendoring the asset set into internal storage and pointing
-# CONTENT_SERVER at that instead of the public server.
+# ~260MB over the network and the least reproducible part of the build, so it is
+# isolated in its own early stage: nothing in this repo can invalidate it.
+# Consider mirroring the asset set internally and pointing ASSETS_SOURCE at it.
 # ===========================================================================
 FROM debian:11 AS content-fetch
 
@@ -366,21 +334,19 @@ WORKDIR /srv/quake-assets
 
 COPY dev/get_assets.sh .
 
-RUN bash get_assets.sh
+# Optional mirror override, in the gh:owner/repo[@ref][:subdir] form documented
+# in dev/get_assets.sh. Empty means the script's own default, so the default
+# lives in exactly one place.
+ARG ASSETS_SOURCE=
+RUN bash get_assets.sh . ${ASSETS_SOURCE:+"$ASSETS_SOURCE"}
 
 
 # ===========================================================================
 # assets -- quakejs content server (bin/content.js) on port 9000.
 #
-# Replaces the prebuilt ghcr image plus the ./base/hf bind mount. Revives
-# dev/Dockerfile.assets, minus its git clone of this repository: the content
-# server and its package manifest now come from the local checkout.
-#
-# dev/Dockerfile.assets was almost certainly disabled because it stopped building:
-# quakejs-files@0.0.3 has been unpublished from npm, and npm 7 fails on the empty
-# packument with "Cannot convert undefined or null to object". It has been dropped
-# from the manifest -- bin/content.js never required it (only lib/asset-graph.js,
-# via bin/repak.js, which this image does not run).
+# The content server and its package manifest come from the local checkout.
+# quakejs-files was dropped from that manifest (see CONTAINERS.md); bin/content.js
+# never required it.
 # ===========================================================================
 FROM debian:11-slim AS assets-deps
 
@@ -391,10 +357,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /srv/quake-assets
 # dev/assets-package.json has no lockfile, so this is npm install, not npm ci.
 # Committing a lockfile for it would make the assets image reproducible.
-#
-# No --omit=dev: this manifest has no devDependencies, so the flag was a no-op.
-# Debian 11 ships npm 7.5.2, which is old enough to be worth handing the smallest
-# possible set of flags.
 COPY dev/assets-package.json package.json
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     npm install --ignore-scripts --no-audit --no-fund
@@ -421,8 +383,6 @@ COPY --from=pak-build /paks/pak100.pk3 /paks/pak101.pk3 ./assets/hf/
 USER quake
 EXPOSE 9000
 
-# Manifest generation gzips every asset at startup to compute compressed sizes,
-# which takes a while on a full asset set -- allow for it in healthchecks.
 ENTRYPOINT ["node", "bin/content.js"]
 
 
@@ -446,33 +406,29 @@ COPY --from=quake-build /out/ioq3ded.js        build/release-js-js/ioq3ded.js
 COPY --from=quake-build /opt/ioq3/node_modules node_modules
 
 # The server configs are the only tracked files under base/; games.log and
-# q3config_server.cfg are runtime output (gitignored) and are written under
-# fs_homepath now.
-COPY base/baseq3/server.cfg base/baseq3/
-COPY base/cpma/server.cfg   base/cpma/
-COPY base/hf/server.cfg     base/hf/
+# q3config_server.cfg are runtime output (gitignored).
+#
+# --chown throughout: the engine writes those two files inside base/<fs_game>/
+# (see below), so the whole tree must belong to the runtime user. Doing it on the
+# COPY avoids a second full-size layer from a recursive chown.
+COPY --chown=quake:quake base/baseq3/server.cfg base/baseq3/
+COPY --chown=quake:quake base/cpma/server.cfg   base/cpma/
+COPY --chown=quake:quake base/hf/server.cfg     base/hf/
 
 # Game data, fetched at build time rather than downloaded at first run.
-COPY --from=content-fetch /srv/quake-assets/assets/ base/
+COPY --chown=quake:quake --from=content-fetch /srv/quake-assets/assets/ base/
 # Freshly built paks take precedence over anything of the same name from the CDN.
-COPY --from=pak-build /paks/pak100.pk3 /paks/pak101.pk3 base/hf/
+COPY --chown=quake:quake --from=pak-build /paks/pak100.pk3 /paks/pak101.pk3 base/hf/
 
 COPY dev/quake.sh bin/quake.sh
 
-# Writable working directory.
+# Writable working directory. fs_homepath is resolved relative to the cwd, so the
+# engine's writes land inside base/<fs_game>/ (owned by the runtime user via the
+# --chown copies above) and FS_Startup may also want to create a directory in
+# /opt/ioq3 itself. Without this, mkdirSync fails with EACCES and the fallback
+# path reports a confusing ENOENT instead. See CONTAINERS.md.
 #
-# There is no separate home path to point at: code/sys/sys_node.js resolves
-# fs_homepath relative to the cwd (PATH.join('.', fs_homepath)) and mounts the
-# host directory there, so the engine's writes -- games.log, q3config_server.cfg
-# -- necessarily land inside the game data tree under base/<fs_game>/. base/ is
-# already owned by the runtime user via the --chown copies above.
-#
-# /opt/ioq3 itself is made writable so that FS_Startup can create a directory in
-# the cwd if the engine default calls for one. Without this, mkdirSync fails with
-# EACCES and the fallback path reports a confusing ENOENT instead.
-#
-# Nothing here is persisted: console output goes to stdout/stderr. See compose.yml
-# for the optional volume if games.log needs to survive a restart.
+# Nothing here is persisted; see compose.yml for the optional volume.
 RUN chown quake:quake /opt/ioq3
 
 USER quake
@@ -483,15 +439,13 @@ ENTRYPOINT ["sh", "bin/quake.sh"]
 # ===========================================================================
 # web -- static client.
 #
-# The old setup served this from the multi-gigabyte build image via
-# `python3 -m http.server`. nginx on alpine does the same job in ~50MB and gzips
-# the very large ioquake3.js on the way out.
+# nginx on alpine is ~50MB and gzips the very large ioquake3.js on the way out.
 #
 # ioquake3.js comes from quake-build, not from the tracked copy in html/ (which
 # .dockerignore excludes), so the image always carries a client built from the
 # current submodule.
 # ===========================================================================
-FROM nginx:1.27-alpine AS web
+FROM nginx:1.30-alpine AS web
 
 COPY dev/nginx.conf /etc/nginx/conf.d/default.conf
 

@@ -1,4 +1,4 @@
-# Development override. Replaces `sh dev.sh iterate`.
+# Development override.
 #
 #   docker compose -f compose.yml -f compose.dev.yml watch
 #
@@ -17,14 +17,20 @@ services:
   assets:
     build:
       target: assets
-    # Local iteration against the full public asset set is slow to fetch the
-    # first time and then cached forever. Point CONTENT_SERVER at an internal
-    # mirror in .env if that first fetch is painful.
+    # The first asset fetch is slow and then cached forever. Set ASSETS_SOURCE in
+    # .env to point at an internal mirror if that first fetch is painful.
     develop:
       watch:
         # New/changed hf sounds change pak101, which the content server serves.
         - path: ./hf/sounds
           action: rebuild
+        # This image also serves pak100, which is built from the engine sources,
+        # so an ioq3 edit leaves it serving a stale pak without this.
+        - path: ./ioq3
+          action: rebuild
+          ignore:
+            - build/
+            - node_modules/
         - path: ./dev/get_assets.sh
           action: rebuild
         - path: ./dev/assets-package.json
@@ -54,15 +60,13 @@ services:
         - path: ./base
           action: rebuild
           ignore:
-            # Runtime output that used to land here via the old bind mounts.
+            # Runtime output, not a build input.
             - games.log
             - q3config_server.cfg
             - "*.pk3"
         - path: ./dev/quake.sh
           action: rebuild
         - path: ./dev/build-quake.sh
-          action: rebuild
-        - path: ./dev/patch-quake.sh
           action: rebuild
 
   web:
@@ -84,10 +88,9 @@ services:
           action: rebuild
         - path: ./tsconfig.json
           action: rebuild
-        # package-lock.json is not a build input: the shenanigans stage resolves
-        # from package.json with --no-package-lock, because the lockfile still
-        # pins the unpublished quakejs-files tarball.
         - path: ./package.json
+          action: rebuild
+        - path: ./package-lock.json
           action: rebuild
         # The client engine comes out of the same compile as the server.
         - path: ./ioq3

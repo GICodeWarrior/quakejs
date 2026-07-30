@@ -65,12 +65,23 @@ GitHub Actions layer cache instead.
 Tests still run through npm directly:
 
 ```shell
-npm install --no-package-lock
+npm install
 npm exec mocha
 ```
 
-`--no-package-lock` is needed until the lockfile is regenerated; see the note on
-`quakejs-files` under Open items.
+## Asset mirror
+
+The `content-fetch` stage downloads ~260MB of game data from a GitHub mirror on
+every cache miss. To point it elsewhere, set `ASSETS_SOURCE` (in `.env` or the
+environment) to a `gh:owner/repo[@ref][:subdir]` spec:
+
+```
+ASSETS_SOURCE=gh:my-org/quake-assets@main:assets
+```
+
+`compose.yml` passes it to both the `assets` and `quake` builds; keep them in
+step, or the two builds each fetch their own copy. Leaving it unset uses the
+default in `dev/get_assets.sh`, which is the single source of truth for it.
 
 ## Images
 
@@ -101,10 +112,11 @@ docker buildx build --target paks --output type=local,dest=artifacts .
   and the host `touch ioq3/code/tools/lcc/lburg/gram.c` are all build stages now.
   `hf/buildpak3.sh` is still the definition of pak101's contents, but it runs
   against the in-image copy of `hf/`.
-- **Game data is fetched at build time.** `dev/get_assets.sh` runs in a build
-  stage and `dev/derive-base.sh` converts the crc32-prefixed download into the
-  plain-named `base/` tree the Quake filesystem needs, so the dedicated server no
-  longer downloads the asset set on first run.
+- **Game data is fetched at build time.** `dev/get_assets.sh` runs in the
+  `content-fetch` stage and the result is copied straight into `base/`, so the
+  dedicated server no longer downloads the asset set on first run. No conversion
+  step is needed: the GitHub mirror stores plain-named pk3s, and `bin/content.js`
+  computes the crc32 prefixes itself at startup.
 - **`dev/patch-quake.sh` is no longer run.** The pinned submodule already
   contains its edits, in a form that differs from what the script generates, so
   re-running it would corrupt the tree. `Containerfile` asserts the tree is
@@ -115,43 +127,34 @@ docker buildx build --target paks --output type=local,dest=artifacts .
 
 ## Open items
 
-- **Client-facing CDN address.** `dev/quake.sh` defaults `fs_cdn` to
-  `assets:9000`, which resolves via compose DNS for the server but is not
-  resolvable by a browser. A public CDN hostname likely needs to be threaded into
-  the web content for a real deployment. `bin/wssproxy.js` also exists but is not
-  wired into compose; if a proxy fronts the dedicated server in production, that
-  belongs here too.
+- **Client and server reach the CDN by different names.** `dev/quake.sh` defaults
+  `fs_cdn` to `assets:9000`, which resolves via compose DNS but not from a
+  browser. The browser client does not use that value: `html/index.html` builds
+  its own `fs_cdn` and `+connect` from `document.location.hostname` plus the
+  hardcoded ports 9000 and 27960. So a single-host deployment works as-is, but
+  the published ports in `compose.yml` are effectively fixed, and splitting the
+  services across hosts means editing `html/index.html`. `bin/wssproxy.js` also
+  exists but is not wired into compose; if a proxy fronts the dedicated server in
+  production, that belongs here too.
 - **`html/ioquake3.js` is still tracked** but is no longer a build input
   (`.dockerignore` excludes it; the web image takes the client from the build).
   It can be removed from git once you are satisfied the built client matches.
 - **The whole `ioq3` submodule is copied into the build**, not just `Makefile`
   and `code/`. `code/ui/ui_shared.h` includes `../../ui/menudef.h`, so the
-  top-level `ui/` directory is required; `Dockerfile.quakedev` got away with a
-  partial copy only because `dev/Dockerfile.quake` had cloned the full tree first.
+  top-level `ui/` directory is required too, and the Makefile reaches for other
+  non-code paths besides. Copying the tree wholesale is cheaper than predicting
+  which ones; `.dockerignore` trims the parts that must not come along.
 - **`fs_homepath` must be relative.** `code/sys/sys_node.js` does
   `PATH.join('.', fs_homepath)` and uses the result as both the NODEFS host root
   and the emscripten mount point, so an absolute value loses its leading slash and
   FS_Startup fails. The entrypoint therefore leaves it unset, which means the
   engine writes `games.log` and `q3config_server.cfg` inside `base/<fs_game>/`
   rather than in a separate state directory.
-- **`quakejs-files` has been unpublished from npm.** The `0.0.3` tarball returns
-  404, so it was removed from both `package.json` and `dev/assets-package.json` to
-  make installs work again. Two consequences:
-  - `package-lock.json` still pins the dead tarball, so `npm ci` cannot succeed.
-    The container build uses `npm install --no-package-lock` instead. Regenerate
-    the lockfile (`rm package-lock.json && npm install`) as its own commit to
-    restore `npm ci`, here and on the host.
-  - `lib/asset-graph.js` requires it, so `bin/repak.js` is unusable until the
-    package is vendored or replaced. This is pre-existing, not caused by the
-    container work -- and it is very likely why `dev/Dockerfile.assets` was
-    commented out in `dev.sh` and `ghcr.yaml` in favour of pulling a prebuilt
-    image built before the package disappeared. Nothing in the three runtime
-    images needs it.
-- **`base/` layout from the CDN.** Verify that `dev/derive-base.sh` produces a
-  tree the dedicated server accepts. If the content server's manifest yields a
-  repacked, map-specific set rather than `pak0`–`pak8`, fall back to letting the
-  server self-download into base/ on first run, with the commented `quake-base`
-  volume in `compose.yml` uncommented so the download survives a restart.
+- **`base/` layout from the mirror.** Confirm the fetched tree is one the
+  dedicated server accepts. If the mirror yields a repacked, map-specific set
+  rather than `pak0`–`pak8`, fall back to letting the server self-download into
+  `base/` on first run, with the commented `quake-base` volume in `compose.yml`
+  uncommented so the download survives a restart.
 - **Debian 11.** Required for python2, which emscripten 1.13.2 needs. Bullseye
   LTS ends 2026-08; the toolchain section of `Containerfile` has a commented
   mirror rewrite for when the packages move to `archive.debian.org`. Pushing the

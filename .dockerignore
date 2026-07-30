@@ -1,11 +1,8 @@
-# Keep the build context small. Without this, every build ships the whole ioq3
-# submodule, node_modules, and any locally-generated pk3 files to the daemon
-# before a single instruction runs. This is a prerequisite for a fast dev loop,
-# not cleanup.
+# Keep the build context small: without this, every build ships the whole ioq3
+# submodule and node_modules to the daemon before a single instruction runs.
 #
-# Rule of thumb: if a file is produced BY the build, it must be listed here --
-# otherwise a stale copy left over from the old dev.sh flow silently becomes a
-# build input.
+# Anything produced BY the build must be listed here, or a stale local copy
+# silently becomes a build input.
 
 # --- VCS / editor ---
 .git
@@ -20,7 +17,7 @@
 # --- dependencies (installed inside the build) ---
 node_modules/
 
-# --- outputs the old dev.sh extracted back onto the host ---
+# --- build outputs ---
 build/
 hf/build/
 assets/
@@ -29,21 +26,16 @@ base/**/*.pk3
 base/hf/games.log
 base/hf/q3config_server.cfg
 html/hf/shenanigans/
-# Tracked, but the web image takes the client from quake-build instead so the
-# image always matches the current submodule.
+# Tracked, but the web image takes the client from quake-build so the image
+# always matches the current submodule.
 html/ioquake3.js
 
-# --- ioq3: the whole submodule is copied into the build, so exclude only what
-#     must not come along.
+# --- ioq3 ---
 #
-#     node_modules is critical: the build stage installs ws@0.4.29 into
-#     /opt/ioq3/node_modules before copying the tree, and the copy merges into
-#     that directory -- a stray local ioq3/node_modules would clobber it.
-#
-#     misc/ is NOT excluded. It is only referenced by the Makefile's installer
-#     and clean targets, so trimming it would be safe, but predicting which
-#     non-code paths the build needs is exactly what broke the client compile on
-#     ui/menudef.h. A few MB of context is cheaper than that class of bug. ---
+# The whole submodule is copied into the build (see CONTAINERS.md), so exclude
+# only what must not come along. node_modules is the critical one: quake-build
+# installs ws@0.4.29 into /opt/ioq3/node_modules before copying the tree, and
+# the copy merges into that directory.
 ioq3/build/
 ioq3/node_modules/
 ioq3/.git
