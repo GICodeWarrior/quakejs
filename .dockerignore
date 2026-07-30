@@ -33,9 +33,19 @@ html/hf/shenanigans/
 # image always matches the current submodule.
 html/ioquake3.js
 
-# --- ioq3: source only. The js build only needs Makefile and code/. ---
+# --- ioq3: the whole submodule is copied into the build, so exclude only what
+#     must not come along.
+#
+#     node_modules is critical: the build stage installs ws@0.4.29 into
+#     /opt/ioq3/node_modules before copying the tree, and the copy merges into
+#     that directory -- a stray local ioq3/node_modules would clobber it.
+#
+#     misc/ is NOT excluded. It is only referenced by the Makefile's installer
+#     and clean targets, so trimming it would be safe, but predicting which
+#     non-code paths the build needs is exactly what broke the client compile on
+#     ui/menudef.h. A few MB of context is cheaper than that class of bug. ---
 ioq3/build/
-ioq3/misc/
+ioq3/node_modules/
 ioq3/.git
 
 # --- compose and docs are never build inputs ---

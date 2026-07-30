@@ -170,8 +170,22 @@ RUN --mount=type=cache,target=/root/.npm,sharing=locked \
 RUN PATH=${LLVM}:$PATH ${EMSCRIPTEN}/emmake --generate-config
 
 # --- source copy: everything below is invalidated by an ioq3 edit ---
-COPY ioq3/Makefile ./Makefile
-COPY ioq3/code ./code
+#
+# The whole submodule, not just Makefile and code/.
+#
+# Dockerfile.quakedev copied only those two, but that worked because
+# dev/Dockerfile.quake had already git-cloned the full ioq3 tree into /opt/ioq3,
+# so the rest was present and quakedev merely overwrote two paths. With the clone
+# gone, a partial copy breaks the build: code/ui/ui_shared.h includes
+# "../../ui/menudef.h", which resolves to the top-level ui/ directory, so the
+# client fails with 'menudef.h file not found'.
+#
+# Copying the tree wholesale reproduces what the clone provided and avoids having
+# to predict which non-code paths the Makefile reaches for. .dockerignore keeps
+# ioq3/.git, ioq3/build/, and ioq3/node_modules/ out; note that node_modules must
+# be excluded because the ws install above lives at /opt/ioq3/node_modules and
+# this COPY merges into that directory.
+COPY ioq3/ ./
 
 # dev/patch-quake.sh is deliberately NOT run.
 #

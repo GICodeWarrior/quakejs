@@ -44,12 +44,12 @@ executed. The Container Images workflow publishes this image on every push to
 docker compose -f compose.yml -f compose.dev.yml watch
 ```
 
-Editing `ioq3/code`, `hf/shenanigans`, `hf/sounds`, or `html` rebuilds only the
+Editing `ioq3`, `hf/shenanigans`, `hf/sounds`, or `html` rebuilds only the
 affected images. Static files under `html/` are synced into the running web
 container without a rebuild.
 
 Builds are incremental: `Containerfile` mounts build caches for the ioq3 object
-directory and the emscripten cache, so a one-file change to `ioq3/code`
+directory and the emscripten cache, so a one-file change under `ioq3/code`
 recompiles that translation unit and relinks rather than rebuilding everything.
 
 This relies on `COPY` preserving mtimes from the working tree, which is what lets
@@ -119,6 +119,10 @@ docker buildx build --target paks --output type=local,dest=artifacts .
 - **`html/ioquake3.js` is still tracked** but is no longer a build input
   (`.dockerignore` excludes it; the web image takes the client from the build).
   It can be removed from git once you are satisfied the built client matches.
+- **The whole `ioq3` submodule is copied into the build**, not just `Makefile`
+  and `code/`. `code/ui/ui_shared.h` includes `../../ui/menudef.h`, so the
+  top-level `ui/` directory is required; `Dockerfile.quakedev` got away with a
+  partial copy only because `dev/Dockerfile.quake` had cloned the full tree first.
 - **`quakejs-files` has been unpublished from npm.** The `0.0.3` tarball returns
   404, so it was removed from both `package.json` and `dev/assets-package.json` to
   make installs work again. Two consequences:

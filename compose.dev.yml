@@ -42,11 +42,13 @@ services:
     develop:
       watch:
         # Engine and game code: the expensive path, kept incremental by the
-        # build/ and emscripten cache mounts.
-        - path: ./ioq3/code
+        # build/ and emscripten cache mounts. Watches the whole submodule to
+        # match the Containerfile's COPY.
+        - path: ./ioq3
           action: rebuild
-        - path: ./ioq3/Makefile
-          action: rebuild
+          ignore:
+            - build/
+            - node_modules/
         - path: ./hf/sounds
           action: rebuild
         - path: ./base
@@ -82,14 +84,16 @@ services:
           action: rebuild
         - path: ./tsconfig.json
           action: rebuild
+        # package-lock.json is not a build input: the shenanigans stage resolves
+        # from package.json with --no-package-lock, because the lockfile still
+        # pins the unpublished quakejs-files tarball.
         - path: ./package.json
           action: rebuild
-        - path: ./package-lock.json
-          action: rebuild
         # The client engine comes out of the same compile as the server.
-        - path: ./ioq3/code
+        - path: ./ioq3
           action: rebuild
-        - path: ./ioq3/Makefile
-          action: rebuild
+          ignore:
+            - build/
+            - node_modules/
         - path: ./dev/nginx.conf
           action: rebuild
