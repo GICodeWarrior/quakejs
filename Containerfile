@@ -292,11 +292,17 @@ FROM node:22-bookworm-slim AS shenanigans-build
 
 WORKDIR /src
 
-COPY package.json package-lock.json ./
+COPY package.json ./
+# --no-package-lock: package-lock.json still pins quakejs-files@0.0.3, whose
+# tarball has been unpublished from the registry (404), so `npm ci` cannot
+# succeed against it. Resolving from package.json alone works now that the
+# dependency has been dropped. Regenerating the lockfile (see CONTAINERS.md)
+# would let this go back to `npm ci`.
+#
 # --ignore-scripts: the runtime dependency set includes very old packages with
 # native build steps that are irrelevant to tsc and fail on modern node.
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm ci --ignore-scripts
+    npm install --no-package-lock --ignore-scripts --no-audit --no-fund
 
 COPY tsconfig.json ./
 COPY hf/shenanigans ./hf/shenanigans
@@ -341,6 +347,12 @@ RUN bash get_assets.sh
 # Replaces the prebuilt ghcr image plus the ./base/hf bind mount. Revives
 # dev/Dockerfile.assets, minus its git clone of this repository: the content
 # server and its package manifest now come from the local checkout.
+#
+# dev/Dockerfile.assets was almost certainly disabled because it stopped building:
+# quakejs-files@0.0.3 has been unpublished from npm, and npm 7 fails on the empty
+# packument with "Cannot convert undefined or null to object". It has been dropped
+# from the manifest -- bin/content.js never required it (only lib/asset-graph.js,
+# via bin/repak.js, which this image does not run).
 # ===========================================================================
 FROM debian:11-slim AS assets-deps
 
@@ -351,9 +363,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /srv/quake-assets
 # dev/assets-package.json has no lockfile, so this is npm install, not npm ci.
 # Committing a lockfile for it would make the assets image reproducible.
+#
+# No --omit=dev: this manifest has no devDependencies, so the flag was a no-op.
+# Debian 11 ships npm 7.5.2, which is old enough to be worth handing the smallest
+# possible set of flags.
 COPY dev/assets-package.json package.json
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install --omit=dev --ignore-scripts
+    npm install --ignore-scripts --no-audit --no-fund
 
 
 FROM debian:11-slim AS assets

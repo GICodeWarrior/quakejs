@@ -60,9 +60,12 @@ GitHub Actions layer cache instead.
 Tests still run through npm directly:
 
 ```shell
-npm install
+npm install --no-package-lock
 npm exec mocha
 ```
+
+`--no-package-lock` is needed until the lockfile is regenerated; see the note on
+`quakejs-files` under Open items.
 
 ## Images
 
@@ -116,6 +119,19 @@ docker buildx build --target paks --output type=local,dest=artifacts .
 - **`html/ioquake3.js` is still tracked** but is no longer a build input
   (`.dockerignore` excludes it; the web image takes the client from the build).
   It can be removed from git once you are satisfied the built client matches.
+- **`quakejs-files` has been unpublished from npm.** The `0.0.3` tarball returns
+  404, so it was removed from both `package.json` and `dev/assets-package.json` to
+  make installs work again. Two consequences:
+  - `package-lock.json` still pins the dead tarball, so `npm ci` cannot succeed.
+    The container build uses `npm install --no-package-lock` instead. Regenerate
+    the lockfile (`rm package-lock.json && npm install`) as its own commit to
+    restore `npm ci`, here and on the host.
+  - `lib/asset-graph.js` requires it, so `bin/repak.js` is unusable until the
+    package is vendored or replaced. This is pre-existing, not caused by the
+    container work -- and it is very likely why `dev/Dockerfile.assets` was
+    commented out in `dev.sh` and `ghcr.yaml` in favour of pulling a prebuilt
+    image built before the package disappeared. Nothing in the three runtime
+    images needs it.
 - **`base/` layout from the CDN.** Verify that `dev/derive-base.sh` produces a
   tree the dedicated server accepts. If the content server's manifest yields a
   repacked, map-specific set rather than `pak0`–`pak8`, fall back to letting the
