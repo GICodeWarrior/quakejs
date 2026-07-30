@@ -1,0 +1,115 @@
+# Production deployment. Self-contained images, no bind mounts.
+#
+#   docker compose build          # builds all three images
+#   docker compose up -d
+#
+# This file is also the only thing needed on a deployment host: with
+# REGISTRY/TAG pointing at a registry and `docker compose pull`, no checkout of
+# this repository is required.
+#
+# The dev loop lives in compose.dev.yml:
+#   docker compose -f compose.yml -f compose.dev.yml watch
+
+name: quakening
+
+# Override REGISTRY and TAG (in a .env file or the environment) to push and pull
+# these images from a registry rather than building locally.
+#
+# TOOLCHAIN_IMAGE defaults to `toolchain`, the stage in Containerfile that builds
+# the emscripten/LLVM toolchain, so no pre-build step is needed. Once the
+# toolchain is published, set it to that reference to skip building it:
+#
+#   TOOLCHAIN_IMAGE=ghcr.io/<owner>/quakejs/toolchain:main docker compose build
+
+networks:
+  quakening:
+
+services:
+  # -------------------------------------------------------------------------
+  # Content server. Serves the baseq3 asset set plus the locally built paks.
+  # The dedicated server and the browser client both pull content from here.
+  # -------------------------------------------------------------------------
+  assets:
+    image: ${REGISTRY:-localhost}/quake-assets:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: Containerfile
+      target: assets
+      args:
+        TOOLCHAIN_IMAGE: ${TOOLCHAIN_IMAGE:-toolchain}
+        CONTENT_SERVER: ${CONTENT_SERVER:-http://content.quakejs.com}
+    container_name: quake-assets
+    restart: unless-stopped
+    networks: [quakening]
+    ports:
+      - "${ASSETS_PORT:-9000}:9000"
+    healthcheck:
+      # content.js gzips every asset at startup to compute compressed sizes, so
+      # first readiness on a full asset set takes a while. Hence start_period.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:9000/assets/manifest.json"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 180s
+
+  # -------------------------------------------------------------------------
+  # Dedicated server. Game data is baked into the image, so this no longer
+  # downloads ~500MB from the CDN on first start.
+  # -------------------------------------------------------------------------
+  quake:
+    image: ${REGISTRY:-localhost}/quake-server:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: Containerfile
+      target: server
+      args:
+        TOOLCHAIN_IMAGE: ${TOOLCHAIN_IMAGE:-toolchain}
+        MAKE_JOBS: ${MAKE_JOBS:-12}
+        CONTENT_SERVER: ${CONTENT_SERVER:-http://content.quakejs.com}
+    container_name: quake
+    restart: unless-stopped
+    networks: [quakening]
+    ports:
+      # QuakeJS networking is WebSockets, so this is TCP.
+      - "${QUAKE_PORT:-27960}:27960"
+    environment:
+      QUAKE_GAME: ${QUAKE_GAME:-hf}
+      # Resolves via compose DNS. A browser cannot resolve this name -- the
+      # client's CDN address is configured separately in the web content.
+      QUAKE_CDN: ${QUAKE_CDN:-assets:9000}
+    depends_on:
+      assets:
+        condition: service_healthy
+    # Console output goes to stdout/stderr. Anything the engine writes to disk
+    # lands under fs_homepath (/var/lib/quake) and is intentionally not
+    # persisted. To keep games.log across restarts, uncomment:
+    # volumes:
+    #   - quake-home:/var/lib/quake
+
+  # -------------------------------------------------------------------------
+  # Static client.
+  # -------------------------------------------------------------------------
+  web:
+    image: ${REGISTRY:-localhost}/quake-web:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: Containerfile
+      target: web
+      args:
+        TOOLCHAIN_IMAGE: ${TOOLCHAIN_IMAGE:-toolchain}
+        MAKE_JOBS: ${MAKE_JOBS:-12}
+    container_name: quake-web
+    restart: unless-stopped
+    networks: [quakening]
+    ports:
+      # nginx listens on 80 inside the container; the external port is unchanged.
+      - "${WEB_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/index.html"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# volumes:
+#   quake-home:

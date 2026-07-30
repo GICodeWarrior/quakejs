@@ -1,0 +1,58 @@
+---
+# Builds pak100.pk3 and pak101.pk3 and uploads them as artifacts.
+#
+# Replaces pak100.yaml and pak101.yaml. Both paks now come out of the single
+# Containerfile, so this needs neither `sh dev.sh build-pk3` (which ran on the
+# runner and wrote into the checkout) nor a host-side hf/buildpak3.sh run.
+name: paks - Quake code and asset modifications
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  paks:
+    name: "pak100 + pak101"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4.2.2
+        with:
+          submodules: true
+
+      - name: Setup docker build
+        uses: docker/setup-buildx-action@v3
+
+      # The `paks` target is a scratch image holding just the two pk3 files, so
+      # --output extracts them directly with no container to run or copy from.
+      - name: Build paks
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Containerfile
+          target: paks
+          platforms: "linux/amd64"
+          outputs: type=local,dest=artifacts
+          build-args: |
+            MAKE_JOBS=4
+          # Same scope as the image workflow, so the toolchain and quake-build
+          # layers are reused instead of recompiled.
+          cache-from: type=gha,scope=quakejs
+          cache-to: type=gha,scope=quakejs,mode=max
+
+      - name: Upload pak100.pk3
+        uses: actions/upload-artifact@v4
+        with:
+          name: pak100.pk3
+          path: artifacts/pak100.pk3
+
+      - name: Upload pak101.pk3
+        uses: actions/upload-artifact@v4
+        with:
+          name: pak101.pk3
+          path: artifacts/pak101.pk3

@@ -6,6 +6,10 @@ To see a live demo, check out [http://www.quakejs.com](http://www.quakejs.com).
 
 This project is a fork of [https://github.com/inolen/quakejs/](https://github.com/inolen/quakejs/) and makes QuakeJS fully locally hostable with your own QuakeJS server, local Play page, and local content server.
 
+> **Building and running this fork:** see [CONTAINERS.md](CONTAINERS.md). The
+> container build supersedes `dev.sh`; the sections below describe the upstream
+> host-based workflow and are kept for reference.
+
 
 ## Building binaries
 

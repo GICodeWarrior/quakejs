@@ -1,0 +1,46 @@
+# Keep the build context small. Without this, every build ships the whole ioq3
+# submodule, node_modules, and any locally-generated pk3 files to the daemon
+# before a single instruction runs. This is a prerequisite for a fast dev loop,
+# not cleanup.
+#
+# Rule of thumb: if a file is produced BY the build, it must be listed here --
+# otherwise a stale copy left over from the old dev.sh flow silently becomes a
+# build input.
+
+# --- VCS / editor ---
+.git
+.gitignore
+.gitmodules
+.github
+*.swp
+.DS_Store
+.idea/
+.vscode/
+
+# --- dependencies (installed inside the build) ---
+node_modules/
+
+# --- outputs the old dev.sh extracted back onto the host ---
+build/
+hf/build/
+assets/
+assets_src/
+base/**/*.pk3
+base/hf/games.log
+base/hf/q3config_server.cfg
+html/hf/shenanigans/
+# Tracked, but the web image takes the client from quake-build instead so the
+# image always matches the current submodule.
+html/ioquake3.js
+
+# --- ioq3: source only. The js build only needs Makefile and code/. ---
+ioq3/build/
+ioq3/misc/
+ioq3/.git
+
+# --- compose and docs are never build inputs ---
+compose.yml
+compose.dev.yml
+README.md
+CONTAINERS.md
+.mocharc.json

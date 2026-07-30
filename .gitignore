@@ -7,3 +7,8 @@ html/hf/shenanigans/**/*.js.map
 base/hf/games.log
 hf/build
 html/hf
+
+# The container build no longer writes generated files into the working tree,
+# but these paths may still hold artifacts from the previous dev.sh flow.
+build/
+base/hf/q3config_server.cfg

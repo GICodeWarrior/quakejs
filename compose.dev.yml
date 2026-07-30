@@ -1,0 +1,95 @@
+# Development override. Replaces `sh dev.sh iterate`.
+#
+#   docker compose -f compose.yml -f compose.dev.yml watch
+#
+# `watch` builds, starts, and then rebuilds the affected services when the paths
+# below change. Rebuilds hit the cache mounts declared in Containerfile, so an
+# edit to a single ioq3 source file recompiles that translation unit and relinks
+# rather than rebuilding the world.
+#
+# Nothing here introduces a bind mount into the production images: the only
+# `sync` action targets nginx's document root, which is static content by
+# definition. Every source path that requires compilation triggers `rebuild`.
+
+name: quakening
+
+services:
+  assets:
+    build:
+      target: assets
+    # Local iteration against the full public asset set is slow to fetch the
+    # first time and then cached forever. Point CONTENT_SERVER at an internal
+    # mirror in .env if that first fetch is painful.
+    develop:
+      watch:
+        # New/changed hf sounds change pak101, which the content server serves.
+        - path: ./hf/sounds
+          action: rebuild
+        - path: ./dev/get_assets.sh
+          action: rebuild
+        - path: ./dev/assets-package.json
+          action: rebuild
+        - path: ./bin/content.js
+          action: rebuild
+
+  quake:
+    build:
+      target: server
+      args:
+        MAKE_JOBS: ${MAKE_JOBS:-12}
+    environment:
+      QUAKE_GAME: ${QUAKE_GAME:-hf}
+    develop:
+      watch:
+        # Engine and game code: the expensive path, kept incremental by the
+        # build/ and emscripten cache mounts.
+        - path: ./ioq3/code
+          action: rebuild
+        - path: ./ioq3/Makefile
+          action: rebuild
+        - path: ./hf/sounds
+          action: rebuild
+        - path: ./base
+          action: rebuild
+          ignore:
+            # Runtime output that used to land here via the old bind mounts.
+            - games.log
+            - q3config_server.cfg
+            - "*.pk3"
+        - path: ./dev/quake.sh
+          action: rebuild
+        - path: ./dev/build-quake.sh
+          action: rebuild
+        - path: ./dev/patch-quake.sh
+          action: rebuild
+
+  web:
+    build:
+      target: web
+    develop:
+      watch:
+        # Static assets can be pushed straight into the running container.
+        - path: ./html
+          action: sync
+          target: /usr/share/nginx/html
+          ignore:
+            # Both are build outputs that live in html/ and must not be synced
+            # from a possibly-stale host copy.
+            - ioquake3.js
+            - hf/shenanigans
+        # TypeScript needs compiling, so this is a rebuild, not a sync.
+        - path: ./hf/shenanigans
+          action: rebuild
+        - path: ./tsconfig.json
+          action: rebuild
+        - path: ./package.json
+          action: rebuild
+        - path: ./package-lock.json
+          action: rebuild
+        # The client engine comes out of the same compile as the server.
+        - path: ./ioq3/code
+          action: rebuild
+        - path: ./ioq3/Makefile
+          action: rebuild
+        - path: ./dev/nginx.conf
+          action: rebuild
