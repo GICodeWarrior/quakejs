@@ -447,6 +447,9 @@ ENTRYPOINT ["sh", "bin/quake.sh"]
 # ===========================================================================
 FROM nginx:1.30-alpine AS web
 
+RUN sed -i 's/^worker_processes.*/worker_processes 2;/' /etc/nginx/nginx.conf \
+ && grep -q '^worker_processes 2;' /etc/nginx/nginx.conf
+
 COPY dev/nginx.conf /etc/nginx/conf.d/default.conf
 
 COPY html/ /usr/share/nginx/html/
