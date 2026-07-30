@@ -325,40 +325,14 @@ RUN cd hf/shenanigans \
 FROM debian:11 AS content-fetch
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates bash jq wget \
+      curl ca-certificates bash \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /srv/quake-assets
 
-ARG CONTENT_SERVER=http://content.quakejs.com
 COPY dev/get_assets.sh .
 
-# get_assets.sh finishes with two hardcoded `ln` calls and has no `set -e`, so
-# its exit status is unreliable. Verify the result explicitly instead of
-# trusting it.
-RUN bash get_assets.sh . "${CONTENT_SERVER}" || true; \
-    jq -e 'length > 0' assets/manifest.json > /dev/null \
- && [ "$(find assets -name '*.pk3' | wc -l)" -gt 0 ]
-
-
-# ===========================================================================
-# base-data -- derive a plain-named base/ tree for the dedicated server.
-#
-# get_assets.sh stores files as <dir>/<crc32>-<name>, which is what
-# bin/content.js wants (the client builds URLs from the manifest, so the prefix
-# just becomes part of the basename it asks for). The Quake filesystem, by
-# contrast, opens paths literally and needs base/baseq3/pak0.pk3.
-#
-# Baking the data in means the server no longer downloads the asset set from the
-# CDN on first run -- which is what the EULA short-circuit in the ioq3 tree is
-# for, and what the README's "you will need a server with around 1GB of RAM"
-# warning is about.
-# ===========================================================================
-FROM content-fetch AS base-data
-
-COPY dev/derive-base.sh /tmp/
-RUN sh /tmp/derive-base.sh /srv/quake-assets/assets /base \
- && [ "$(find /base -name '*.pk3' | wc -l)" -gt 0 ]
+RUN bash get_assets.sh
 
 
 # ===========================================================================
@@ -435,7 +409,7 @@ COPY base/cpma/server.cfg   base/cpma/
 COPY base/hf/server.cfg     base/hf/
 
 # Game data, fetched at build time rather than downloaded at first run.
-COPY --from=base-data /base/ base/
+COPY --from=content-fetch /srv/quake-assets/assets/ base/
 # Freshly built paks take precedence over anything of the same name from the CDN.
 COPY --from=pak-build /paks/pak100.pk3 /paks/pak101.pk3 base/hf/
 

@@ -1,75 +1,103 @@
 #!/bin/bash
+#
+# Bash script to download all QuakeJS assets.
+#
+# Originally by Sean Begley (2017-07-06), which pulled from
+# http://content.quakejs.com. That host is offline, so assets now come from the
+# GitHub mirror:
+#
+#   https://github.com/gionko/content.quakejs.com/tree/master/assets
+#
+# The mirror stores plain pk3s, which is all bin/content.js needs. It walks the
+# assets directory at startup, computes each file's crc32 and gzip'd length, and
+# serves the result at /assets/manifest.json. Requests arrive as
+# assets/<dir>/<crc32>-<name>; content.js verifies the crc against its own
+# manifest and then reads the plain file off disk. So there is deliberately no
+# manifest.json written here and no crc32-prefixed copies -- generating either
+# would be dead weight, and a hand-computed gzip length does not match Node's
+# zlib output anyway.
+#
+# If you ever serve these files from a plain webserver instead of content.js,
+# you WILL need a real manifest.json and crc32-prefixed filenames, since nothing
+# is left to strip the prefix at request time.
+#
+# The mirror is fetched as a tarball streamed straight through tar, so the
+# archive never lands on disk and gzip's per-member CRC catches a truncated or
+# corrupted transfer. Every run re-downloads the whole tree (~260MB); there is
+# no incremental update.
+#
+# USAGE
+#   ./get_assets.sh                                  # default mirror, output to .
+#   ./get_assets.sh /srv/quake-assets                # alternate output folder
+#   ./get_assets.sh /srv/quake-assets gh:owner/repo  # alternate GitHub mirror
+#
+# Mirror spec: gh:owner/repo[@ref][:subdir]  (ref defaults to master,
+# subdir to assets)
+#
+# Requires: bash, curl, tar
 
-#Sean Begley
-#2017-07-06
+set -uo pipefail
 
-#Bash Script to download all Assets from a quakejs content server.
-#The default server is http://content.quakejs.com
+DEFAULT_SOURCE="gh:gionko/content.quakejs.com@master:assets"
 
-#OPTIONAL first parameters ($1) = address of alternate quakejs content server
+output_dir="${1:-.}"
+source_spec="${2:-$DEFAULT_SOURCE}"
+assets_dir="$output_dir/assets"
 
-#EXAMPLE USAGE
-#./get_assets.sh
-#./get_assets.sh /alternate/output/folder
-#./get_assets.sh /alternate/output/folder http://alternate.content.server.com
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+note() { printf '%s\n' "$*"; }
 
-#Setup output folder
-#Default to "."
-#If the user enters parameters then the 1st parameter is the desired output directory
-output_dir=.
-if [ ! -z "$1" ]; then
-	output_dir=$1
-fi
-
-#Setup the content server address
-#Default to http://content.quakejs.com
-#If the user enters paremters then the 2nd parameter is the desired content server
-server="http://content.quakejs.com"
-if [ ! -z "$2" ]; then
-	server=$2
-fi
-printf "Using content server: $server\n"
-
-#Download manifest.json and get the # of assets available
-printf "Downloading manifest.json\n"
-mkdir -p "$output_dir/assets"
-wget --quiet --continue --no-clobber -O "$output_dir/assets/manifest.json" "$server/assets/manifest.json"
-num_elems=$(jq '. | length' "$output_dir/assets/manifest.json")
-#manifest="$(wget --quiet --continue --no-clobber -O $server/assets/manifest.json)"
-#num_elems=$(echo "$manifest" | jq '. | length')
-printf "$num_elems assets found in manifest.json\n"
-
-#loop through the manifest and download each file
-#name contains the path/filename
-#checksum contains the checksum value
-#the file has to be downloaded from "path/checksum-filename"
-for i in $( eval echo {1..$num_elems} )
-do
-	let "j = $i - 1"
-	name=$(jq -r '.['$j'].name' "$output_dir/assets/manifest.json")
-	IFS='/' name_tokens=( $name )
-	if [ ${#name_tokens[@]} -eq "1" ]; then
-		filename=$(jq -r '.['$j'].checksum' "$output_dir/assets/manifest.json")'-'${name_tokens[0]}
-		download_path='assets'
-	else
-		filename=$(jq -r '.['$j'].checksum' "$output_dir/assets/manifest.json")'-'${name_tokens[1]}
-		download_path='assets/'${name_tokens[0]}
-	fi
-	printf "Downloading $name to $output_dir/$download_path/$filename\n"
-	
-	#if output path doesn't exist, make it
-	if [ ! -d "$output_dir/$download_path" ]; then
-		mkdir "$output_dir/$download_path"
-	fi
-	
-	#download file
-	wget --quiet --continue --no-clobber -O "$output_dir/$download_path/$filename" "$server/$download_path/$filename"	
+for tool in curl tar; do
+	command -v "$tool" >/dev/null 2>&1 || die "missing required tool: $tool"
 done
 
-# quakejs server looks for these files without the crc32 prefix
-(
-  cd assets
-  ln 857908472-linuxq3ademo-1.11-6.x86.gz.sh linuxq3ademo-1.11-6.x86.gz.sh 
-  ln 296843703-linuxq3apoint-1.32b-3.x86.run linuxq3apoint-1.32b-3.x86.run
-)
+spec=$source_spec
+case $spec in
+	http://*|https://*)
+		die "only GitHub mirrors are supported; expected gh:owner/repo[@ref][:subdir], got '$spec'" ;;
+esac
 
+spec=${spec#gh:}
+subdir="assets"; ref="master"
+case $spec in
+	*:*) subdir=${spec##*:}; spec=${spec%%:*} ;;
+esac
+case $spec in
+	*@*) ref=${spec##*@}; spec=${spec%%@*} ;;
+esac
+repo=$spec
+[[ $repo == */* ]] || die "expected a GitHub mirror like gh:owner/repo[@ref][:subdir], got '$source_spec'"
+
+# The archive's top level is a single <repo>-<sha>/ directory, so strip that
+# plus however many components the requested subdir adds.
+strip=1
+pattern=
+if [ -n "$subdir" ]; then
+	strip=$(( 2 + $(printf '%s' "$subdir" | tr -cd '/' | wc -c) ))
+	pattern="*/$subdir/*"
+fi
+
+mkdir -p "$assets_dir" || die "cannot create $assets_dir"
+
+note "Streaming https://codeload.github.com/$repo/tar.gz/refs/heads/$ref"
+# Piped straight into tar, so the archive never hits disk, and only the subdir
+# is unpacked -- directly into place, no staging copy. --wildcards is GNU tar;
+# bsdtar matches patterns without it, so retry bare if the first form fails.
+fetch() { curl -fsSL --retry 3 --retry-delay 2 \
+	"https://codeload.github.com/$repo/tar.gz/refs/heads/$ref"; }
+
+if ! fetch | tar xz -C "$assets_dir" --strip-components="$strip" \
+		${pattern:+--wildcards "$pattern"} 2>/dev/null
+then
+	if ! fetch | tar xz -C "$assets_dir" --strip-components="$strip" ${pattern:+"$pattern"}
+	then
+		die "download or extraction failed"
+	fi
+fi
+
+# guard against a silently empty unpack, e.g. a bad subdir that matched nothing
+find "$assets_dir" -type f -name '*.pk3' | grep -q . \
+	|| die "no pk3s unpacked; is '$subdir' correct for $repo@$ref?"
+
+note "Assets in $assets_dir"
+note "Done. Serve with:  node bin/content.js   (it builds manifest.json itself)"
