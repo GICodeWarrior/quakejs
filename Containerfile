@@ -131,8 +131,18 @@ FROM debian:11 AS toolchain
 ARG EMSCRIPTEN_VERSION=1.13.2
 ENV EMSCRIPTEN_VERSION=${EMSCRIPTEN_VERSION}
 
+# build-essential is required and easy to miss: the ioq3 Makefile hardcodes
+# TOOLS_CC = gcc and builds the QVM toolchain (q3lcc, q3rcc, q3cpp, q3asm) with
+# the NATIVE compiler, not emcc. Those tools then compile the .qvm files.
+#
+# dev/Dockerfile.quake never named it because it used a plain `apt-get install`:
+# Debian's npm Depends on node-gyp, which Recommends build-essential, so gcc
+# arrived transitively. Adding --no-install-recommends silently removed it and the
+# build failed at 'TOOLS_CC code/tools/lcc/etc/lcc.c: gcc: No such file or
+# directory'. Depending on a recommend of a dependency is not something to rely
+# on, so it is named explicitly here.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates nodejs npm git python2 make bison curl \
+      ca-certificates build-essential nodejs npm git python2 make bison curl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python2 0
@@ -144,10 +154,14 @@ COPY --from=toolchain-compile /opt/emscripten /opt/emscripten
 ENV LLVM=/opt/llvm/usr/local/bin
 ENV EMSCRIPTEN=/opt/emscripten
 
-# Fail early and loudly if the toolchain didn't actually land.
+# Fail early and loudly if the toolchain didn't actually land. gcc is included
+# because the QVM tools need it and its absence otherwise shows up minutes into a
+# compile rather than here.
 RUN test -x "${LLVM}/clang" \
  && test -x "${EMSCRIPTEN}/emcc" \
- && test -x "${EMSCRIPTEN}/emmake"
+ && test -x "${EMSCRIPTEN}/emmake" \
+ && command -v gcc > /dev/null \
+ && command -v bison > /dev/null
 
 
 # ===========================================================================
