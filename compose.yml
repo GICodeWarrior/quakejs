@@ -1,0 +1,128 @@
+# Production deployment. Self-contained images, no bind mounts.
+#
+#   docker compose build          # builds both images
+#   docker compose up -d
+#
+# This file is also the only thing needed on a deployment host: with
+# REGISTRY/TAG pointing at a registry and `docker compose pull`, no checkout of
+# this repository is required.
+#
+# Dev launch:
+#   docker compose up --build --watch
+
+name: quakening
+
+# No container_name: entries -- container names are a daemon-global namespace and
+# collide with leftovers this project does not recognise as its own. Compose names
+# containers <project>-<service>-<n>, and service names remain the network
+# aliases, so `fs_cdn web:80` is unaffected. Use
+# `docker compose logs -f quake` / `docker compose exec quake sh`.
+#
+# Override REGISTRY and TAG (in a .env file or the environment) to push and pull
+# these images from a registry rather than building locally.
+#
+# TOOLCHAIN_IMAGE defaults to `toolchain`, the stage in Containerfile that builds
+# the emscripten/LLVM toolchain, so no pre-build step is needed. Once the
+# toolchain is published, set it to that reference to skip building it:
+#
+#   TOOLCHAIN_IMAGE=ghcr.io/<owner>/quakejs/toolchain:main docker compose build
+
+networks:
+  quakening:
+
+services:
+  # -------------------------------------------------------------------------
+  # Dedicated server. Game data is baked into the image, so this does not
+  # download the asset set from the CDN on first start.
+  # -------------------------------------------------------------------------
+  quake:
+    image: ${REGISTRY:-localhost}/quake-server:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: Containerfile
+      target: server
+      args:
+        TOOLCHAIN_IMAGE: ${TOOLCHAIN_IMAGE:-toolchain}
+        MAKE_JOBS: ${MAKE_JOBS:-12}
+        # Keep in step with the assets service; see the note there.
+        ASSETS_REPO: ${ASSETS_REPO:-}
+        ASSETS_REF: ${ASSETS_REF:-}
+    restart: unless-stopped
+    networks: [quakening]
+    ports:
+      # QuakeJS networking is WebSockets, so this is TCP. html/index.html hardcodes
+      # 27960 in its +connect argument, so changing this needs a client edit too.
+      - "${QUAKE_PORT:-27960}:27960"
+    environment:
+      QUAKE_GAME: ${QUAKE_GAME:-hf}
+      QUAKE_CDN: ${QUAKE_CDN:-web:80}
+    depends_on:
+      web:
+        condition: service_healthy
+    develop:
+      watch:
+        - path: ./ioq3
+          action: rebuild
+        - path: ./hf/sounds
+          action: rebuild
+        - path: ./base
+          action: rebuild
+        - path: ./dev/quake.sh
+          action: rebuild
+        - path: ./dev/build-quake.sh
+          action: rebuild
+
+  # -------------------------------------------------------------------------
+  # Static client, and the asset set it downloads. The dedicated server pulls
+  # content from here too, over the compose network.
+  # -------------------------------------------------------------------------
+  web:
+    image: ${REGISTRY:-localhost}/quake-web:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: Containerfile
+      target: web
+      args:
+        TOOLCHAIN_IMAGE: ${TOOLCHAIN_IMAGE:-toolchain}
+        MAKE_JOBS: ${MAKE_JOBS:-12}
+        # Optional asset mirror; empty uses the Containerfile default. Must
+        # match the quake service, or the two builds fetch the asset set twice.
+        ASSETS_REPO: ${ASSETS_REPO:-}
+        ASSETS_REF: ${ASSETS_REF:-}
+    restart: unless-stopped
+    networks: [quakening]
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsSo", "/dev/null", "http://localhost/"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    develop:
+      watch:
+        # Static files can be pushed straight into the running container. This
+        # syncs ./html only, so the assets/ tree the image was built with is
+        # left alone.
+        - path: ./html
+          action: sync
+          target: /usr/share/nginx/html
+        # TypeScript needs compiling, so this is a rebuild, not a sync.
+        - path: ./hf/shenanigans
+          action: rebuild
+        - path: ./tsconfig.json
+          action: rebuild
+        - path: ./package.json
+          action: rebuild
+        - path: ./package-lock.json
+          action: rebuild
+        # pak100 is built from the engine sources
+        - path: ./ioq3
+          action: rebuild
+        # New/changed hf sounds change pak101
+        - path: ./hf/sounds
+          action: rebuild
+        - path: ./dev/nginx.conf
+          action: rebuild
+        - path: ./dev/catalog-assets.sh
+          action: rebuild

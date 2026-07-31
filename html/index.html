@@ -96,7 +96,7 @@
 				// merge default args with query string args
 				//var args = ['+set', 'fs_cdn', 'content.quakejs.com:80', '+set', 'sv_master1', 'master.quakejs.com:27950']; //original args to list the servers from master.quakejs.com
 				//var args = ['+set', 'fs_cdn', 'content.quakejs.com:80', '+set', 'sv_master1', 'master.quakejs.com:27950', '+connect', 'YOUR_SERVER_HERE:27960']; //additional +connect arguement to connect to a specific server
-				var args = ['+set', 'fs_cdn', document.location.hostname + ':9000', '+connect', document.location.hostname + ':27960']; //custom args list targeting a local content server and local game server both at the address 'quakejs'
+				var args = ['+set', 'fs_cdn', document.location.host, '+connect', document.location.hostname + ':27960'];
 				args.push.apply(args, getQueryCommands());
 
 				ioq3.callMain(args);

@@ -4,7 +4,11 @@ QuakeJS is a port of [ioquake3](http://www.ioquake3.org) to JavaScript with the 
 
 To see a live demo, check out [http://www.quakejs.com](http://www.quakejs.com).
 
-This project is a fork of [https://github.com/inolen/quakejs/](https://github.com/inolen/quakejs/) and makes QuakeJS fully locally hostable with your own QuakeJS server, local Play page, and local content server.
+This project is a fork of [https://github.com/inolen/quakejs/](https://github.com/inolen/quakejs/) and makes QuakeJS fully locally hostable with your own QuakeJS server, local Play page, and locally hosted assets.
+
+> **Building and running this fork:** see [CONTAINERS.md](CONTAINERS.md). The
+> container build supersedes `dev.sh`; the sections below describe the upstream
+> host-based workflow and are kept for reference.
 
 
 ## Building binaries
@@ -118,9 +122,9 @@ node build/ioq3ded.js +set fs_game baseq3 +set dedicated 2 +exec server.cfg
 
 and you should be able to join at http://www.quakejs.com/play?connect%20SERVER_IP:27960, replacing `SERVER_IP` with the IP of your server.
 
-## Running a content server
+## Hosting assets
 
-QuakeJS loads assets directly from a central content server. A public content server is available at `content.quakejs.com`, however, if you'd like you run your own (to perhaps provide new mods) you'll need to first repackage assets into the format QuakeJS expects.
+QuakeJS loads assets over HTTP from whatever address `fs_cdn` names. It expects a manifest at `/assets/manifest.json` listing every asset's name, size and CRC32, and each asset itself at `/assets/<dir>/<crc>-<name>`. A public host is available at `content.quakejs.com`; to run your own (to perhaps provide new mods) repackage the assets, then catalog them into that layout.
 
 ### Repackaging assets
 
@@ -132,17 +136,19 @@ To run this process:
 node bin/repak.js --src <assets_src> --dest <assets>
 ```
 
-And to launch the content server after the repackaging is complete:
+### Cataloging assets
+
+`dev/catalog-assets.sh` writes the manifest and a copy of each asset named after its own checksum:
 
 ```shell
-node bin/content.js
+dev/catalog-assets.sh <assets> <webroot>
 ```
 
-Note: `./assets` is assumed to be the default asset directory. If you'd like to change that, you'll need to modify the JSON configuration used by the content server.
+The result is a `<webroot>/assets/` directory that any static file server can host, with no application to run alongside it. The script needs `jq`, and coreutils 9.6 or newer for `cksum -a crc32b`.
 
-Once the content server is available, you can use it by launching your local or dedicated server with `+set fs_cdn <server_address>`.
+Serve `<webroot>` and launch your local or dedicated server with `+set fs_cdn <server_address>`. The container build does this and serves the result from its nginx; see [CONTAINERS.md](CONTAINERS.md).
 
-## Running a local dedicated server, content server, and play page
+## Running a local dedicated server and play page
 
 It is possible to run a QuakeJS server, Content Server, and Play Page entirely locally (for use on a LAN with no external internet connection required).
 
@@ -159,20 +165,19 @@ Copy `init.d/quakejs` to `/etc/init.d/`, make it executable, and enable it by ru
 ## Running Secure Servers (Content, Dedicated, and Web) Quick-Start
 
 1. Follow the [baseq3 server, step-by-step](#baseq3-server-step-by-step) instructions to initialize your repo, get `base/` assets and start a dedicated server config.
-2. Set up your `./assets` directory for the content server using the instructions in [Running a content server](#running-a-content-server).
-3. Point all the `bin/*_secure.json` configs to your key and cert (if you don't already have some, you can get some for free using [certbot](https://certbot.eff.org/)). Also make sure to point the `web_secure.json` to your own domain for the content server.
-4. `node bin/content.js --config ./content_secure.json`
-5. `node build/ioq3ded_secure.js +set dedicated 1 +set fs_cdn <your_domain>:9000 +set fs_game baseq3 +exec server.cfg`
-6. `node bin/wssproxy.js --config ./wssproxy.json`
-7. `node bin/web.js --config ./web.json` (you may want to customize this server config so it serves on port 443)
+2. Catalog your assets into the web server's document root using the instructions in [Hosting assets](#hosting-assets).
+3. Point all the `bin/*_secure.json` configs to your key and cert (if you don't already have some, you can get some for free using [certbot](https://certbot.eff.org/)). Also make sure to point the `web_secure.json` to your own domain.
+4. `node build/ioq3ded_secure.js +set dedicated 1 +set fs_cdn <your_domain> +set fs_game baseq3 +exec server.cfg`
+5. `node bin/wssproxy.js --config ./wssproxy.json`
+6. `node bin/web.js --config ./web.json` (you may want to customize this server config so it serves on port 443)
 
-You now have a content server running securely on port 9000, a dedicated server on (insecure) port 27960 (this one should be kept private, behind a firewall), a wss:// proxy running securely on port 27961, and a secure web server running on (ideally) port 443. Make sure ports 443, 9000, and 27961 are forwarded through your firewall so clients can connect to them.
+You now have a dedicated server on (insecure) port 27960 (this one should be kept private, behind a firewall), a wss:// proxy running securely on port 27961, and a secure web server running on (ideally) port 443, serving both the play page and the assets. Make sure ports 443 and 27961 are forwarded through your firewall so clients can connect to them.
 
 Now you (and others) can connect to your secure dedicated server at `https://<SERVER_DOMAIN>/play?connect%20<SERVER_DOMAIN>:27961`, replacing `<SERVER_DOMAIN>` with the domain of your server (must match your SSL certificate).
 
 ### Notes
 
-* Secure and insecure servers are incompatible. A secure web server cannot talk to an insecure content server, a secure content server cannot talk to an insecure dedicated server, etc.
+* Secure and insecure servers are incompatible. A secure web server cannot talk to an insecure dedicated server, etc.
 * Master servers cannot work securely since they use IP addresses directly, so the browser would be unable to validate the SSL certificate. You can only connect directly to a known secure dedicated server using the URL above.
 
 ## Adding custom maps & content

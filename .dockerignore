@@ -1,0 +1,38 @@
+# Anything produced BY the build should be listed here, or a stale local copy
+# silently becomes a build input.
+
+# --- VCS / editor ---
+.git
+.gitignore
+.gitmodules
+.github
+*.swp
+.DS_Store
+.idea/
+.vscode/
+
+# --- dependencies (installed inside the build) ---
+node_modules/
+
+# --- build outputs ---
+build/
+hf/build/
+assets/
+assets_src/
+html/assets/
+base/**/*.pk3
+base/hf/games.log
+base/hf/q3config_server.cfg
+html/ioquake3.js
+html/hf/shenanigans/
+
+# --- ioq3 ---
+ioq3/build/
+ioq3/node_modules/
+ioq3/.git
+
+# --- compose and docs are never build inputs ---
+compose.yml
+README.md
+CONTAINERS.md
+.mocharc.json
